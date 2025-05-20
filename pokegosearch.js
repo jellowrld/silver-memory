@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         PokéGO Autocomplete Search + Coords GUI
+// @name         PokéGO Search Tool (Autocomplete + Coordinates + Click-to-Copy)
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  Autocomplete Pokémon names (only released in GO), scrape coordinates, and display clickable results from pokego.me
+// @version      3.0
+// @description  Search any Pokémon in GO from any site, see coordinates, and click to copy. Works via scraping PokéGO.me live data with autocomplete, cancel, and popup UI.
 // @author       You
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
@@ -16,7 +16,6 @@
 
     let POKEMON_LIST = [];
 
-    // Fetch released Pokémon from PoGoAPI
     function loadPokemonNames() {
         GM_xmlhttpRequest({
             method: "GET",
@@ -24,7 +23,7 @@
             onload: function (response) {
                 const data = JSON.parse(response.responseText);
                 POKEMON_LIST = Object.values(data).map(p => p.name).sort();
-                console.log("Loaded Pokémon list from PoGoAPI:", POKEMON_LIST.length, "names");
+                console.log("Pokémon GO list loaded:", POKEMON_LIST.length);
             }
         });
     }
@@ -35,47 +34,64 @@
         container.innerHTML = `
             <div id="poke-box">
                 <input id="poke-search" type="text" placeholder="Search Pokémon..." autocomplete="off" />
+                <button id="poke-cancel">Cancel</button>
                 <div id="poke-suggestions"></div>
             </div>
         `;
         document.body.appendChild(container);
 
         const input = document.getElementById('poke-search');
-        const suggestionBox = document.getElementById('poke-suggestions');
+        const suggestions = document.getElementById('poke-suggestions');
 
         input.addEventListener('input', () => {
             const val = input.value.toLowerCase();
-            suggestionBox.innerHTML = '';
-            if (val.length < 1) return;
-
-            const suggestions = POKEMON_LIST.filter(name => name.toLowerCase().startsWith(val)).slice(0, 20);
-            suggestions.forEach(name => {
+            suggestions.innerHTML = '';
+            if (!val) return;
+            const matches = POKEMON_LIST.filter(name => name.toLowerCase().startsWith(val)).slice(0, 20);
+            matches.forEach(name => {
                 const div = document.createElement('div');
                 div.textContent = name;
                 div.className = 'poke-suggestion';
                 div.onclick = () => {
                     input.value = name;
-                    suggestionBox.innerHTML = '';
+                    suggestions.innerHTML = '';
+                    container.remove();
+                    document.removeEventListener('click', outsideClick);
                     fetchCoordinates(name);
                 };
-                suggestionBox.appendChild(div);
+                suggestions.appendChild(div);
             });
         });
+
+        document.getElementById('poke-cancel').onclick = () => {
+            container.remove();
+            document.removeEventListener('click', outsideClick);
+        };
+
+        function outsideClick(e) {
+            if (!document.getElementById('poke-box').contains(e.target)) {
+                container.remove();
+                document.removeEventListener('click', outsideClick);
+            }
+        }
+
+        setTimeout(() => document.addEventListener('click', outsideClick), 100);
     }
 
     function fetchCoordinates(pokemonName) {
-        const url = `https://pokego.me/coordinates?pokemon=${encodeURIComponent(pokemonName)}&city=All%20Locations`;
+        const searchUrl = `https://pokego.me/coordinates?pokemon=${encodeURIComponent(pokemonName)}&city=All%20Locations`;
 
         GM_xmlhttpRequest({
             method: "GET",
-            url: url,
+            url: searchUrl,
             onload: function (response) {
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(response.responseText, "text/html");
-                const rows = doc.querySelectorAll("#coordinates-table tbody tr");
+                const table = doc.querySelector("#coordinates-table");
+                const rows = table?.querySelectorAll("tbody tr");
 
-                if (rows.length === 0) {
-                    alert(`No results found for "${pokemonName}".`);
+                if (!rows || rows.length === 0) {
+                    alert(`No coordinates found for "${pokemonName}".`);
                     return;
                 }
 
@@ -83,34 +99,40 @@
                 rows.forEach(row => {
                     const cols = row.querySelectorAll("td");
                     if (cols.length >= 5) {
-                        const lat = cols[0].textContent.trim();
-                        const lon = cols[1].textContent.trim();
-                        const iv = cols[2].textContent.trim();
-                        const lvl = cols[3].textContent.trim();
-                        const cp = cols[4].textContent.trim();
-                        results.push({ lat, lon, iv, lvl, cp });
+                        results.push({
+                            lat: cols[0].textContent.trim(),
+                            lon: cols[1].textContent.trim(),
+                            iv: cols[2].textContent.trim(),
+                            lvl: cols[3].textContent.trim(),
+                            cp: cols[4].textContent.trim()
+                        });
                     }
                 });
 
-                showResultsOverlay(pokemonName, results.slice(0, 30));
+                if (results.length === 0) {
+                    alert(`No valid entries found for "${pokemonName}".`);
+                } else {
+                    showResultsOverlay(pokemonName, results.slice(0, 30));
+                }
             },
-            onerror: () => alert("Failed to fetch coordinates.")
+            onerror: () => alert("Failed to fetch data from PokéGO.me.")
         });
     }
 
     function showResultsOverlay(pokemonName, results) {
         const overlay = document.createElement('div');
         overlay.id = 'coords-overlay';
+
         const box = document.createElement('div');
         box.id = 'coords-box';
 
         const close = document.createElement('button');
         close.textContent = "Close";
-        close.onclick = () => overlay.remove();
         close.className = 'close-btn';
+        close.onclick = () => overlay.remove();
 
         const title = document.createElement('h2');
-        title.textContent = `Coords for ${pokemonName}`;
+        title.textContent = `Results for ${pokemonName}`;
         box.appendChild(close);
         box.appendChild(title);
 
@@ -136,11 +158,10 @@
         document.body.appendChild(overlay);
     }
 
-    // Insert base UI trigger
     function createTriggerButton() {
         const btn = document.createElement('button');
-        btn.textContent = "PokéGO Search";
         btn.id = 'poke-trigger';
+        btn.textContent = "PokéGO Search";
         btn.onclick = () => {
             if (!document.getElementById('poke-overlay')) {
                 createSearchUI();
@@ -149,7 +170,6 @@
         document.body.appendChild(btn);
     }
 
-    // Add CSS
     GM_addStyle(`
         #poke-trigger {
             position: fixed;
@@ -180,9 +200,18 @@
             padding: 8px;
             font-size: 14px;
         }
+        #poke-cancel {
+            margin-top: 10px;
+            padding: 5px 10px;
+            background: #bbb;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
         #poke-suggestions {
             max-height: 200px;
             overflow-y: auto;
+            margin-top: 5px;
         }
         .poke-suggestion {
             padding: 6px;
