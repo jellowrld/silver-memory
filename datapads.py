@@ -13,8 +13,13 @@ class Destiny2DataPadApp:
         self.root.title("Destiny 2: The Edge of Fate - Data Pad Locations")
         self.root.geometry("800x600")
 
-        # Scrape image URLs from GameRant article
+        # Scrape image URLs from GameRant and Destructoid articles
         self.image_urls = self.scrape_image_urls()
+
+        # Override scraped URLs with confirmed ones
+        self.image_urls["Skywatch data pad"] = "https://static0.gamerantimages.com/wordpress/wp-content/uploads/2025/07/skywatch-data-pad.jpg?q=49&fit=crop&w=500&dpr=2"
+        self.image_urls["Starcrossed data pad 1"] = "https://www.destructoid.com/wp-content/uploads/2025/07/STarcrossed-Datapad-1-1.jpg?w=1200"
+        self.image_urls["Starcrossed data pad 2"] = "https://www.destructoid.com/wp-content/uploads/2025/07/Starcrossed-Datapad-2-1.jpg?w=1200"
 
         # Data structure for Data Pads
         self.data_pads = {
@@ -23,7 +28,7 @@ class Destiny2DataPadApp:
                     "Op": "Skywatch",
                     "Location": "When you reach the outside area after defeating all enemies and clearing the shielded door, turn around to find this Data Pad on a barrel.",
                     "Image": "Skywatch data pad",
-                    "Image_URL": self.image_urls.get("Skywatch data pad", None)
+                    "Image_URL": self.image_urls.get("Skywatch data pad")
                 },
                 {
                     "Op": "The Salt Mines",
@@ -150,6 +155,21 @@ class Destiny2DataPadApp:
                             "Image_URL": self.image_urls.get("Kell's Fall data pad 2", None)
                         }
                     ]
+                },
+                {
+                    "Op": "Starcrossed",
+                    "Locations": [
+                        {
+                            "Description": "After taking down the three Wyverns and unlocking the Vex transport mechanism, complete a platforming session deep in the rocky underbelly of the Black Garden. In an open area with a few Vex in front of you, head further up to find the Data Pad on top of a platform.",
+                            "Image": "Starcrossed data pad 1",
+                            "Image_URL": self.image_urls.get("Starcrossed data pad 1")
+                        },
+                        {
+                            "Description": "From the first Data Pad, continue onward and jump to a rocky section below on your right. Take down the droves of Vex that appear and find this Data Pad glowing by a wall on your left.",
+                            "Image": "Starcrossed data pad 2",
+                            "Image_URL": self.image_urls.get("Starcrossed data pad 2")
+                        }
+                    ]
                 }
             ]
         }
@@ -159,86 +179,78 @@ class Destiny2DataPadApp:
 
     def scrape_image_urls(self):
         """
-        Scrape image URLs from the GameRant article.
+        Scrape image URLs from GameRant and Destructoid articles.
         Returns a dictionary mapping Data Pad image names to their URLs.
         """
-        url = "https://gamerant.com/destiny-2-all-data-pad-locations-week-1-solo-fireteam-pinnacle-ops/"
+        urls = [
+            "https://gamerant.com/destiny-2-all-data-pad-locations-week-1-solo-fireteam-pinnacle-ops/",
+            "https://www.destructoid.com/all-starcrossed-data-pad-locations-in-destiny-2-edge-of-fate-pinnacle-data-pad-retrieval-part-2/"
+        ]
         image_urls = {}
-        try:
-            # Fetch the webpage
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 
-            # Find all image tags
-            images = soup.find_all('img')
-            for img in images:
-                src = img.get('src', '')
-                alt = img.get('alt', '')
-                # Check if the image is hosted on GameRant's static server and matches a Data Pad name
-                if 'static0.gamerantimages.com' in src:
-                    # Normalize the image name for matching
-                    for data_pad in [
-                        "Skywatch data pad", "The Salt Mines data pad", "Caldera data pad",
-                        "The Glassway data pad 1", "The Glassway data pad 2",
-                        "The Inverted Spire data pad 1", "The Inverted Spire data pad 2",
-                        "Battleground Conduit data pad 1", "Battleground Conduit data pad 2",
-                        "Battleground Delve data pad 1", "Battleground Delve data pad 2",
-                        "Empire Hunt The Dark Priestess data pad", "Empire Hunt The Technocrat data pad 1",
-                        "Empire Hunt The Warrior data pad 1", "Kell's Fall data pad 1", "Kell's Fall data pad 2"
-                    ]:
-                        # Check if the Data Pad name appears in the alt text or nearby text
-                        if data_pad.lower() in alt.lower() or data_pad.lower() in img.find_parent().text.lower():
-                            image_urls[data_pad] = src
-                            break
-        except requests.RequestException as e:
-            messagebox.showerror("Error", f"Failed to scrape image URLs: {str(e)}")
+        for url in urls:
+            try:
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, 'html.parser')
+                images = soup.find_all('img')
+                for img in images:
+                    src = img.get('src', '')
+                    alt = img.get('alt', '')
+                    # Check if the image is hosted on GameRant or Destructoid servers
+                    if 'gamerantimages.com' in src or 'destructoid.com' in src:
+                        for data_pad in [
+                            "Skywatch data pad", "The Salt Mines data pad", "Caldera data pad",
+                            "The Glassway data pad 1", "The Glassway data pad 2",
+                            "The Inverted Spire data pad 1", "The Inverted Spire data pad 2",
+                            "Battleground Conduit data pad 1", "Battleground Conduit data pad 2",
+                            "Battleground Delve data pad 1", "Battleground Delve data pad 2",
+                            "Empire Hunt The Dark Priestess data pad", "Empire Hunt The Technocrat data pad 1",
+                            "Empire Hunt The Warrior data pad 1", "Kell's Fall data pad 1", "Kell's Fall data pad 2",
+                            "Starcrossed data pad 1", "Starcrossed data pad 2"
+                        ]:
+                            if data_pad.lower() in alt.lower() or data_pad.lower() in img.find_parent().text.lower():
+                                image_urls[data_pad] = src
+                                break
+            except requests.RequestException as e:
+                messagebox.showerror("Error", f"Failed to scrape image URLs from {url}: {str(e)}")
         return image_urls
 
     def create_widgets(self):
-        # Main frame
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        # Title
         ttk.Label(main_frame, text="Destiny 2: The Edge of Fate - Data Pad Locations", font=("Arial", 16, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
 
-        # Activity Type Dropdown
         ttk.Label(main_frame, text="Select Activity Type:").grid(row=1, column=0, sticky=tk.W, pady=5)
         self.activity_var = tk.StringVar()
         activity_dropdown = ttk.Combobox(main_frame, textvariable=self.activity_var, values=list(self.data_pads.keys()), state="readonly")
         activity_dropdown.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5)
         activity_dropdown.bind("<<ComboboxSelected>>", self.update_operation_dropdown)
 
-        # Operation Dropdown
         ttk.Label(main_frame, text="Select Operation:").grid(row=2, column=0, sticky=tk.W, pady=5)
         self.operation_var = tk.StringVar()
         self.operation_dropdown = ttk.Combobox(main_frame, textvariable=self.operation_var, state="readonly")
         self.operation_dropdown.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
         self.operation_dropdown.bind("<<ComboboxSelected>>", self.update_data_pad_dropdown)
 
-        # Data Pad Dropdown (for operations with multiple Data Pads)
         ttk.Label(main_frame, text="Select Data Pad:").grid(row=3, column=0, sticky=tk.W, pady=5)
         self.data_pad_var = tk.StringVar()
         self.data_pad_dropdown = ttk.Combobox(main_frame, textvariable=self.data_pad_var, state="readonly")
         self.data_pad_dropdown.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=5)
         self.data_pad_dropdown.bind("<<ComboboxSelected>>", self.display_data_pad)
 
-        # Text Area for Location Description
         self.description_text = tk.Text(main_frame, height=5, width=50, wrap=tk.WORD)
         self.description_text.grid(row=4, column=0, columnspan=2, pady=10)
         self.description_text.config(state="disabled")
 
-        # Image Label
         self.image_label = ttk.Label(main_frame)
         self.image_label.grid(row=5, column=0, columnspan=2, pady=10)
 
-        # Image URL Button
         self.url_button = ttk.Button(main_frame, text="Open Image in Browser", command=self.open_image_url, state="disabled")
         self.url_button.grid(row=6, column=0, columnspan=2, pady=5)
 
-        # Exit Button
         ttk.Button(main_frame, text="Exit", command=self.root.quit).grid(row=7, column=0, columnspan=2, pady=10)
 
     def update_operation_dropdown(self, event):
@@ -254,7 +266,7 @@ class Destiny2DataPadApp:
                 self.description_text.config(state="disabled")
                 self.image_label.config(image="")
                 self.url_button.config(state="disabled")
-            else:  # Fireteam Ops, Pinnacle Ops
+            else:
                 operations = [op["Op"] for op in self.data_pads[activity]]
                 self.operation_dropdown["values"] = operations
                 self.operation_dropdown.set("")
@@ -277,7 +289,7 @@ class Destiny2DataPadApp:
                         break
                 self.data_pad_dropdown["values"] = []
                 self.data_pad_dropdown.set("")
-            else:  # Fireteam Ops, Pinnacle Ops
+            else:
                 for op in self.data_pads[activity]:
                     if op["Op"] == operation:
                         data_pads = [f"Data Pad {i+1}" for i in range(len(op["Locations"]))]
@@ -303,13 +315,11 @@ class Destiny2DataPadApp:
                     self.display_data_pad_info(location, image_url)
 
     def display_data_pad_info(self, location, image_url):
-        # Update description
         self.description_text.config(state="normal")
         self.description_text.delete(1.0, tk.END)
         self.description_text.insert(tk.END, location)
         self.description_text.config(state="disabled")
 
-        # Update image
         self.image_label.config(image="")
         self.current_image_url = image_url
         if image_url:
