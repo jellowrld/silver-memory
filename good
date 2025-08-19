@@ -1,0 +1,184 @@
+import pymem
+import pymem.process
+import time
+import keyboard
+import psutil
+from capstone import *  # For disassembling code
+from typing import List, Tuple
+
+def get_process_by_name(process_name: str) -> int:
+    """Find the process ID by name."""
+    for proc in psutil.process_iter(['name']):
+        if proc.info['name'].lower() == process_name.lower():
+            return proc.pid
+    raise Exception(f"Process {process_name} not found!")
+
+def scan_memory(pm: pymem.Pymem, value_type: str, initial_value: int = None) -> List[int]:
+    """Scan memory for a value (e.g., ammo or timer)."""
+    try:
+        if value_type == "int":
+            return pm.pattern_scan_all(value=initial_value, type="int")
+        elif value_type == "float":
+            return pm.pattern_scan_all(value=initial_value, type="float")
+        else:
+            raise ValueError("Unsupported value type. Use 'int' or 'float'.")
+    except Exception as e:
+        print(f"Error scanning memory: {e}")
+        return []
+
+def rescan_memory(pm: pymem.Pymem, addresses: List[int], value_type: str) -> List[int]:
+    """Rescan memory to narrow down addresses that changed."""
+    valid_addresses = []
+    for addr in addresses:
+        try:
+            if value_type == "int":
+                pm.read_int(addr)
+            elif value_type == "float":
+                pm.read_float(addr)
+            valid_addresses.append(addr)
+        except:
+            continue
+    return valid_addresses
+
+def find_base_pointer(pm: pymem.Pymem, address: int) -> Tuple[int, List[int]]:
+    """Attempt to find a base pointer for a dynamic address."""
+    try:
+        module = pymem.process.module_from_name(pm.process_handle, pm.process_name)
+        base_address = module.lpBaseOfDll
+        offsets = []  # Simplified; use Cheat Engine for accurate pointer scanning
+        return base_address, offsets
+    except Exception as e:
+        print(f"Error finding base pointer: {e}")
+        return 0, []
+
+def disassemble_code(pm: pymem.Pymem, address: int, size: int = 64) -> List[Tuple[int, str, str]]:
+    """Disassemble code at the given address using Capstone."""
+    try:
+        # Read memory at the address
+        code = pm.read_bytes(address - 32, size)  # Read 64 bytes around the address
+        md = Cs(CS_ARCH_X86, CS_MODE_64)  # Assume 64-bit architecture
+        instructions = []
+        for i in md.disasm(code, address - 32):
+            instructions.append((i.address, i.mnemonic, i.op_str))
+        return instructions
+    except Exception as e:
+        print(f"Error disassembling code: {e}")
+        return []
+
+def extract_signature(instructions: List[Tuple[int, str, str]]) -> str:
+    """Extract a potential signature from disassembled instructions."""
+    # Look for common instructions (e.g., MOV, CMP) that might control a timer
+    signature_bytes = []
+    for addr, mnemonic, op_str in instructions:
+        if mnemonic in ["mov", "cmp", "add", "sub"]:
+            signature_bytes.append(f"{mnemonic} {op_str}")
+    return "; ".join(signature_bytes[:5])  # Return first 5 relevant instructions as a signature
+
+def monitor_anti_cheat(pm: pymem.Pymem, process_name: str) -> bool:
+    """Basic check for anti-cheat by monitoring process status."""
+    try:
+        process = psutil.Process(pm.process_id)
+        if not process.is_running():
+            print("Warning: Process terminated. Possible anti-cheat detection.")
+            return False
+        return True
+    except Exception as e:
+        print(f"Error monitoring process: {e}")
+        return False
+
+def main():
+    # Configuration
+    process_name = input("Enter the game process name (e.g., game.exe): ")
+    value_type = input("Enter value type to scan (int/float): ").lower()
+    print("Start shooting in-game. Press 'q' to stop scanning.")
+
+    try:
+        # Step 1: Attach to the game process
+        pm = pymem.Pymem(process_name)
+        print(f"Attached to {process_name} (PID: {pm.process_id})")
+
+        # Step 2: Initial memory scan
+        print("Performing initial memory scan...")
+        addresses = scan_memory(pm, value_type)
+        print(f"Found {len(addresses)} potential addresses.")
+
+        # Step 3: Narrow down addresses while shooting
+        while not keyboard.is_pressed('q'):
+            print("Shoot now to detect changing values...")
+            time.sleep(1)
+            addresses = rescan_memory(pm, addresses, value_type)
+            print(f"Narrowed down to {len(addresses)} addresses.")
+
+            # If few addresses remain, test them
+            if len(addresses) < 10:
+                print("Potential timer addresses:", [hex(addr) for addr in addresses])
+                for addr in addresses:
+                    try:
+                        if value_type == "int":
+                            value = pm.read_int(addr)
+                        else:
+                            value = pm.read_float(addr)
+                        print(f"Address {hex(addr)}: {value}")
+                        # Test modifying the value
+                        test_value = 0 if value_type == "float" else 1
+                        pm.write_int(addr, test_value) if value_type == "int" else pm.write_float(addr, test_value)
+                        print(f"Set {hex(addr)} to {test_value}. Check if firing rate changed.")
+                        time.sleep(2)
+                    except Exception as e:
+                        print(f"Error testing address {hex(addr)}: {e}")
+                break
+
+        # Step 4: Find base pointer
+        if addresses:
+            print("Attempting to find base pointer for first address...")
+            base_addr, offsets = find_base_pointer(pm, addresses[0])
+            print(f"Base address: {hex(base_addr)}, Offsets: {offsets}")
+
+        # Step 5: Analyze code
+        if addresses:
+            print("\nStep 5: Disassembling code at first address...")
+            instructions = disassemble_code(pm, addresses[0])
+            if instructions:
+                print("Disassembled instructions:")
+                for addr, mnemonic, op_str in instructions:
+                    print(f"0x{addr:016x}: {mnemonic} {op_str}")
+                # Extract potential signature
+                signature = extract_signature(instructions)
+                print(f"Potential signature: {signature}")
+            else:
+                print("No instructions found. Use Cheat Engine or a disassembler for further analysis.")
+
+        # Step 6: Monitor anti-cheat
+        print("\nStep 6: Monitoring for anti-cheat detection...")
+        if monitor_anti_cheat(pm, process_name):
+            print("No immediate anti-cheat detection. Test in a safe environment.")
+        else:
+            print("Anti-cheat may have been triggered. Proceed with caution.")
+
+        # Step 7: Document signature
+        print("\nStep 7: Documenting signature...")
+        if addresses and instructions:
+            with open("signature.txt", "w") as f:
+                f.write(f"Address: {hex(addresses[0])}\n")
+                f.write(f"Base Address: {hex(base_addr)}\n")
+                f.write(f"Offsets: {offsets}\n")
+                f.write(f"Signature: {signature}\n")
+                f.write("Instructions:\n")
+                for addr, mnemonic, op_str in instructions:
+                    f.write(f"0x{addr:016x}: {mnemonic} {op_str}\n")
+            print("Signature saved to 'signature.txt'. Verify its uniqueness manually.")
+
+        print("\nManual steps required:")
+        print("- Validate the signature using Cheat Engine or a disassembler (e.g., IDA Pro).")
+        print("- Test the signature across game sessions to ensure stability.")
+        print("- Use a safe environment (e.g., single-player) to avoid anti-cheat bans.")
+
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if 'pm' in locals():
+            pm.close_process()
+            print("Detached from process.")
+
+if __name__ == "__main__":
+    main()
