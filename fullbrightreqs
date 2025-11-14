@@ -1,0 +1,5 @@
+pip install dxcam numpy pyglet pywin32 psutil
+
+pip install opencv-python
+
+pip install monitorcontrol
