@@ -1,0 +1,24 @@
+Below is a single main.cpp that wires all of this together, assuming you have:
+	•	Dear ImGui (core + imgui_impl_win32.cpp + imgui_impl_dx11.cpp)
+	•	DirectX 11 SDK (Windows 10 SDK is fine)
+	•	Linked libs: d3d11.lib dxgi.lib d3dcompiler.lib dxva2.lib psapi.lib user32.lib gdi32.lib
+
+This is a template / skeleton, but it’s real, buildable code once ImGui is in place.
+
+⸻
+
+1. Project setup (once)
+
+In Visual Studio (recommended):
+	•	New → “Empty Project” (x64, Release/Debug)
+	•	Add:
+	•	main.cpp (below)
+	•	ImGui sources:
+	•	imgui.cpp, imgui_draw.cpp, imgui_tables.cpp, imgui_widgets.cpp
+	•	imgui_impl_win32.cpp, imgui_impl_dx11.cpp
+	•	Include directories:
+	•	imgui/ folder
+	•	Linker → Additional Dependencies:
+	•	d3d11.lib; dxgi.lib; d3dcompiler.lib; dxva2.lib; psapi.lib; user32.lib; gdi32.lib;
+
+You’ll also need imgui_impl_win32.h and imgui_impl_dx11.h in your include path.
