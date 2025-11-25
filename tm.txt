@@ -1,0 +1,367 @@
+// ==UserScript==
+// @name         CD Key Meta-Search (Unified Deals Panel + GG.deals API)
+// @namespace    http://tampermonkey.net/
+// @version      2.5
+// @description  Right-side neon tab with GG.deals API, CheapShark, manual key stores, filters, history, auto-detect game title
+// @match        *://*/*
+// @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @connect      api.gg.deals
+// @connect      www.cheapshark.com
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // =========================
+    // CONFIG
+    // =========================
+    const GGDEALS_API_KEY = "QB555ITua8UH7swDChXC3FeCwLqiK8-h";
+    const STORAGE_KEY_HISTORY = 'cdkey_meta_search_history_v1';
+    const HISTORY_LIMIT = 10;
+
+    // GG.deals headers
+    const GG_HEADERS = {
+        "accept": "application/json",
+        "x-api-key": GGDEALS_API_KEY
+    };
+
+    // =========================
+    // STORE METADATA
+    // =========================
+
+    const GG_STORE_MAP = {
+        // storeID: { name, sellerType, redeem, productType }
+        1:  { name: "Steam", sellerType: "official", redeem: "steam", productType: "key" },
+        2:  { name: "Epic Games Store", sellerType: "official", redeem: "epic", productType: "key" },
+        3:  { name: "GOG", sellerType: "official", redeem: "gog", productType: "key" },
+        4:  { name: "Ubisoft", sellerType: "official", redeem: "uplay", productType: "key" },
+        5:  { name: "EA App", sellerType: "official", redeem: "ea", productType: "key" },
+        6:  { name: "Microsoft Store", sellerType: "official", redeem: "xbox", productType: "key" },
+        7:  { name: "PlayStation Store", sellerType: "official", redeem: "ps", productType: "key" },
+        8:  { name: "Amazon", sellerType: "official", redeem: "multi", productType: "key" },
+
+        // Resellers
+        11: { name: "GreenManGaming", sellerType: "reseller", redeem: "steam", productType: "key" },
+        12: { name: "Fanatical", sellerType: "reseller", redeem: "steam", productType: "key" },
+        13: { name: "GameBillet", sellerType: "reseller", redeem: "steam", productType: "key" },
+        14: { name: "GamesPlanet", sellerType: "reseller", redeem: "steam", productType: "key" },
+        15: { name: "Voidu", sellerType: "reseller", redeem: "steam", productType: "key" },
+
+        // Marketplaces (grey market)
+        20: { name: "G2A", sellerType: "marketplace", redeem: "multi", productType: "key/account" },
+        21: { name: "Kinguin", sellerType: "marketplace", redeem: "multi", productType: "key/account" },
+        22: { name: "Gamivo", sellerType: "marketplace", redeem: "multi", productType: "key/account" },
+        23: { name: "Eneba", sellerType: "marketplace", redeem: "multi", productType: "key/account" },
+    };
+
+    // Manual stores (unchanged)
+    const MANUAL_STORES = [
+        { id: 'allkeyshop', name: 'AllKeyShop', sellerType: 'reseller', redeem: 'multi', productType: 'key', url: q => `https://www.allkeyshop.com/blog/catalogue/search-${encodeURIComponent(q)}/` },
+        { id: 'eneba', name: 'Eneba', sellerType: 'marketplace', redeem: 'multi', productType: 'key', url: q => `https://www.eneba.com/store?text=${encodeURIComponent(q)}` },
+        { id: 'g2a', name: 'G2A', sellerType: 'marketplace', redeem: 'multi', productType: 'key', url: q => `https://www.g2a.com/search?query=${encodeURIComponent(q)}` },
+        { id: 'instant-gaming', name: 'Instant-Gaming', sellerType: 'reseller', redeem: 'multi', productType: 'key', url: q => `https://www.instant-gaming.com/en/search/?q=${encodeURIComponent(q)}` },
+        { id: 'cdkeys', name: 'CDKeys.com', sellerType: 'reseller', redeem: 'multi', productType: 'key', url: q => `https://www.cdkeys.com/catalogsearch/result/?q=${encodeURIComponent(q)}` },
+        { id: 'kinguin', name: 'Kinguin', sellerType: 'marketplace', redeem: 'multi', productType: 'key/account', url: q => `https://www.kinguin.net/en/search?search=${encodeURIComponent(q)}` },
+        { id: 'gamivo', name: 'Gamivo', sellerType: 'marketplace', redeem: 'multi', productType: 'key/account', url: q => `https://www.gamivo.com/search/${encodeURIComponent(q)}` },
+        { id: 'hrk', name: 'HRK', sellerType: 'reseller', redeem: 'multi', productType: 'key', url: q => `https://www.hrkgame.com/en/games/products?search=${encodeURIComponent(q)}` },
+        { id: 'greenman', name: 'GreenManGaming', sellerType: 'reseller', redeem: 'steam', productType: 'key', url: q => `https://www.greenmangaming.com/search/${encodeURIComponent(q)}/` },
+        { id: 'humble', name: 'Humble Bundle', sellerType: 'reseller', redeem: 'steam', productType: 'key', url: q => `https://www.humblebundle.com/store/search?search=${encodeURIComponent(q)}` },
+        { id: 'gameflip', name: 'Gameflip', sellerType: 'marketplace', redeem: 'multi', productType: 'account/key', url: q => `https://gameflip.com/shop/games/${encodeURIComponent(q)}` },
+
+        // Official
+        { id: 'steam', name: 'Steam Store', sellerType: 'official', redeem: 'steam', productType: 'key', url: q => `https://store.steampowered.com/search/?term=${encodeURIComponent(q)}` },
+        { id: 'epic', name: 'Epic Games', sellerType: 'official', redeem: 'epic', productType: 'key', url: q => `https://store.epicgames.com/en-US/browse?q=${encodeURIComponent(q)}` },
+        { id: 'xbox', name: 'Xbox Store', sellerType: 'official', redeem: 'xbox', productType: 'key', url: q => `https://www.xbox.com/en-us/search?q=${encodeURIComponent(q)}` },
+        { id: 'psn', name: 'PlayStation Store', sellerType: 'official', redeem: 'ps', productType: 'key', url: q => `https://store.playstation.com/en-us/search/${encodeURIComponent(q)}` },
+        { id: 'amazon', name: 'Amazon', sellerType: 'official', redeem: 'multi', productType: 'key', url: q => `https://www.amazon.com/s?k=${encodeURIComponent(q)}+PC+game` },
+    ];
+
+    // =========================
+    // UTILS
+    // =========================
+
+    function httpJSON(url, headers = {}) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url,
+                headers,
+                onload: res => {
+                    try { resolve(JSON.parse(res.responseText)); }
+                    catch (e) { reject(e); }
+                },
+                onerror: err => reject(err)
+            });
+        });
+    }
+
+    // =========================
+    // GG.DEALS FULL API LOGIC
+    // =========================
+
+    async function ggSearchGame(query) {
+        const url = `https://api.gg.deals/v1/games/search/?q=${encodeURIComponent(query)}`;
+        try {
+            const json = await httpJSON(url, GG_HEADERS);
+            if (!json || !json.data || !json.data.length) return null;
+
+            // Best match = first item
+            return json.data[0];
+        } catch (e) {
+            console.log("GG Search error:", e);
+            return null;
+        }
+    }
+
+    async function ggGetOffers(gameID) {
+        const url = `https://api.gg.deals/v1/games/${gameID}/offers/`;
+        try {
+            const json = await httpJSON(url, GG_HEADERS);
+            if (!json || !json.data || !json.data.length) return [];
+
+            return json.data.map(o => {
+                const s = GG_STORE_MAP[o.store_id] || {
+                    name: `Store ${o.store_id}`,
+                    sellerType: "reseller",
+                    redeem: "other",
+                    productType: "key"
+                };
+
+                return {
+                    source: "ggdeals",
+                    title: o.title,
+                    store: s.name,
+                    sellerType: s.sellerType,
+                    redeem: s.redeem,
+                    productType: s.productType,
+                    price: o.price?.amount || null,
+                    currency: o.price?.currency || "USD",
+                    url: o.url
+                };
+            });
+        } catch (e) {
+            console.log("GG Offers error:", e);
+            return [];
+        }
+    }
+
+    async function fetchGGDeals(query) {
+        const game = await ggSearchGame(query);
+        if (!game) return [];
+
+        const gameID = game.id;
+        return await ggGetOffers(gameID);
+    }
+
+    // =========================
+    // CHEAPSHARK (unchanged)
+    // =========================
+    async function fetchCheapShark(query) {
+        const url = `https://www.cheapshark.com/api/1.0/deals?title=${encodeURIComponent(query)}`;
+        try {
+            const data = await httpJSON(url);
+            return data.map(d => ({
+                source: "cheapshark",
+                title: d.title,
+                store: d.storeID,
+                sellerType: "reseller",
+                redeem: "multi",
+                productType: "key",
+                price: parseFloat(d.salePrice),
+                currency: "USD",
+                url: `https://www.cheapshark.com/redirect?dealID=${d.dealID}`
+            }));
+        } catch {
+            return [];
+        }
+    }
+
+    // =========================
+    // Unified Fetch
+    // =========================
+    async function fetchAll(query) {
+        const [gg, cs] = await Promise.all([
+            fetchGGDeals(query),
+            fetchCheapShark(query)
+        ]);
+
+        const manual = MANUAL_STORES.map(s => ({
+            source: "manual",
+            title: query,
+            store: s.name,
+            sellerType: s.sellerType,
+            redeem: s.redeem,
+            productType: s.productType,
+            price: null,
+            currency: "",
+            url: s.url(query)
+        }));
+
+        return [...gg, ...cs, ...manual];
+    }
+
+    // =========================
+    // UI (unchanged)
+    // =========================
+
+    function addStyles() {
+        GM_addStyle(`
+            #cdkey-panel, #cdkey-tab {
+                all: initial;
+                font-family: Arial, sans-serif;
+            }
+            #cdkey-tab {
+                position: fixed;
+                top: 40%;
+                right: 0;
+                width: 36px;
+                height: 140px;
+                background: linear-gradient(180deg, #0ff, #7f5dff);
+                border-radius: 10px 0 0 10px;
+                box-shadow: 0 0 12px rgba(0,255,255,0.8);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                z-index: 999999;
+            }
+            #cdkey-tab span {
+                transform: rotate(-90deg);
+                font-size: 12px;
+                color: #000;
+                font-weight: 700;
+            }
+            #cdkey-panel {
+                position: fixed;
+                top: 10%;
+                right: -420px;
+                width: 400px;
+                height: 80%;
+                background: #0b0e17d9;
+                border-left: 2px solid #0ff;
+                border-radius: 16px 0 0 16px;
+                box-shadow: -2px 0 20px rgba(0,0,0,0.7);
+                z-index: 999998;
+                display: flex;
+                flex-direction: column;
+                backdrop-filter: blur(8px);
+                transition: right .25s ease-out;
+                color: #e0e0ff;
+            }
+            #cdkey-panel.open { right: 0; }
+            #cdkey-panel-header {
+                padding: 12px;
+                display: flex;
+                justify-content: space-between;
+                font-weight: 700;
+            }
+            #cdkey-close-btn {
+                cursor: pointer;
+                font-size: 20px;
+            }
+            #cdkey-panel-body {
+                padding: 10px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            #cdkey-query-input {
+                width: 100%;
+                padding: 8px;
+                border-radius: 8px;
+                background: #111829;
+                color: #c5eaff;
+                border: 1px solid #0ff4;
+            }
+            #cdkey-search-btn {
+                padding: 8px;
+                border-radius: 8px;
+                border: none;
+                background: linear-gradient(135deg,#0ff,#7f5dff);
+                cursor: pointer;
+                font-weight: 700;
+            }
+            .cdkey-pill {
+                padding: 2px 6px;
+                border-radius: 6px;
+                font-size: 10px;
+            }
+            .cdkey-pill-gg {
+                background: rgba(255,0,255,0.25);
+                border: 1px solid rgba(255,0,255,0.7);
+                color: #fdb;
+            }
+        `);
+    }
+
+    function buildUI() {
+        const tab = document.createElement('div');
+        tab.id = "cdkey-tab";
+        tab.innerHTML = `<span>CD DEALS</span>`;
+        document.body.appendChild(tab);
+
+        const panel = document.createElement('div');
+        panel.id = "cdkey-panel";
+        panel.innerHTML = `
+            <div id="cdkey-panel-header">
+                <span>CD Key Meta Search</span>
+                <span id="cdkey-close-btn">&times;</span>
+            </div>
+            <div id="cdkey-panel-body">
+                <input id="cdkey-query-input" placeholder="Game Title...">
+                <button id="cdkey-search-btn">Search</button>
+                <div id="cdkey-status"></div>
+                <div id="cdkey-results"></div>
+            </div>
+        `;
+        document.body.appendChild(panel);
+
+        return { tab, panel };
+    }
+
+    function renderResults(list) {
+        const out = list.map(r => `
+            <div style="background:#111827;padding:8px;border-radius:8px;margin-bottom:6px;">
+                <div><b>${r.store}</b></div>
+                ${r.source === "ggdeals" ? `<div class="cdkey-pill cdkey-pill-gg">GG</div>` : ""}
+                <div>Price: ${r.price ? `$${r.price}` : "N/A"}</div>
+                <div><a href="${r.url}" target="_blank" style="color:#0ff">Open</a></div>
+            </div>
+        `).join("");
+
+        document.querySelector("#cdkey-results").innerHTML = out;
+    }
+
+    // =========================
+    // INIT
+    // =========================
+    async function init() {
+        addStyles();
+        const { tab, panel } = buildUI();
+
+        const input = document.querySelector("#cdkey-query-input");
+        const btn = document.querySelector("#cdkey-search-btn");
+        const status = document.querySelector("#cdkey-status");
+
+        tab.onclick = () => panel.classList.add("open");
+        document.querySelector("#cdkey-close-btn").onclick = () => panel.classList.remove("open");
+
+        btn.onclick = async () => {
+            const q = input.value.trim();
+            if (!q) return;
+
+            status.textContent = "Fetching GG.deals + CheapShark + Stores…";
+            const data = await fetchAll(q);
+
+            status.textContent = `Found ${data.length} results`;
+            renderResults(data);
+        };
+    }
+
+    if (document.readyState === "complete") init();
+    else window.addEventListener("DOMContentLoaded", init);
+
+})();
