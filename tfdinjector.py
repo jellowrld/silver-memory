@@ -4,7 +4,7 @@ import time
 import threading
 import shutil
 import tkinter as tk
-from tkinter import filedialog, scrolledtext
+from tkinter import filedialog, scrolledtext, messagebox
 from ctypes import *
 import winreg
 import re
@@ -91,17 +91,13 @@ class DLLInjectorGUI:
         self.root = root
         self.root.title("Jell's TFD Njector")
         self.root.geometry("700x620")
-
         self.dll_path = tk.StringVar()
         self.injection_done = False
         self.injected_pid = None
         self.delayed_injection = False
         self.blackcipher_delay = tk.DoubleVar(value=2500.0)
-
-        # Variables for checkboxes (they were missing!)
         self.delete_cfg_var = tk.BooleanVar()
         self.update_ini_var = tk.BooleanVar()
-
         self.setup_winapi()
         self.build_ui()
         self.load_last_dll_path()
@@ -129,6 +125,50 @@ class DLLInjectorGUI:
         self.psapi.GetModuleBaseNameW.argtypes = [c_void_p, c_void_p, c_wchar_p, c_ulong]
         self.psapi.GetModuleBaseNameW.restype = c_ulong
 
+    # ------------------ Info Popups ------------------
+    def show_m1ui_info(self):
+        messagebox.showinfo(
+            "M1UI Injection Flow",
+            "M1UI Detected DLL Behavior:\n\n"
+            "• The injector detects M1UI-specific exports (InitializeUI, RenderUI, etc.) "
+            "and strings (m1ui, imgui, overlay, etc.)\n"
+            "• All pre-launch cleanup (CFG delete, INI update, folder cleaning) is SKIPPED\n"
+            "• BlackCipher is NOT killed\n"
+            "• No delay is applied\n"
+            "• Injection happens IMMEDIATELY when the game process (M1-Win64-Shipping.exe) is detected\n"
+            "• Standard LoadLibraryA injection is used\n"
+            "• This is typically for internal menu DLLs that don't require bypassing delays or anti-cheat timing."
+        )
+
+    def show_dx12_info(self):
+        messagebox.showinfo(
+            "DX12 Injection Flow",
+            "DX12 Hook DLL Behavior:\n\n"
+            "• The DLL contains 'LoadLibraryA', 'GetProcAddress' imports from kernel32.dll "
+            "AND the string 'D3D12' → classified as DX12 hook\n"
+            "• Delayed injection is DISABLED\n"
+            "• Injection occurs IMMEDIATELY when game process starts\n"
+            "• If BlackCipherDelay setting is enabled and >0, the CFG.ini file is temporarily "
+            "modified to set BlackCipherDelay to your chosen value (e.g., 2500ms) for instant injection timing\n"
+            "• Normal cleanup (logs, crashes, webcache) still occurs if selected\n"
+            "• Ideal for DX12-based cheats that need to hook early in render pipeline."
+        )
+
+    def show_delayed_info(self):
+        messagebox.showinfo(
+            "Delayed Injection Flow",
+            "Delayed (Non-DX12) Injection Behavior:\n\n"
+            "• DLL lacks DX12 indicators → treated as legacy/direct injection\n"
+            "• When game process is detected:\n"
+            "   → Wait 25 seconds\n"
+            "   → Kill BlackCipher64.aes process (anti-cheat component)\n"
+            "   → Wait additional 15 seconds (total ~40s delay)\n"
+            "   → Then perform standard LoadLibraryA injection\n"
+            "• This bypasses timing-based anti-cheat checks that occur during early launch\n"
+            "• CFG.ini is NOT modified in this mode\n"
+            "• Used for older or non-DX12 hooks that need to inject after initial protections load."
+        )
+
     # ------------------ UI Build ------------------
     def build_ui(self):
         # ---------- Colors ----------
@@ -141,13 +181,11 @@ class DLLInjectorGUI:
         GREEN = "#5cff8d"
         ORANGE = "#ffb454"
         RED = "#ff5c5c"
-
         # ---------- Fonts ----------
         FONT_TITLE = ("Segoe UI", 16, "bold")
         FONT_LABEL = ("Segoe UI", 10)
         FONT_BTN = ("Segoe UI", 10, "bold")
         FONT_CONSOLE = ("Consolas", 9)
-
         self.root.configure(bg=BG_MAIN)
 
         # ================= HEADER =================
@@ -189,14 +227,12 @@ class DLLInjectorGUI:
         status_panel = tk.Frame(self.root, bg=BG_PANEL)
         status_panel.pack(fill="x", padx=20, pady=8)
         self.status_labels = {}
-
         def status_badge(text, color):
             lbl = tk.Label(status_panel, text=text, bg=color,
                            fg="#000000", font=("Segoe UI", 9, "bold"),
                            padx=10, pady=2)
             lbl.pack(side="left", padx=6, pady=8)
             return lbl
-
         self.status_labels["m1ui"] = status_badge("M1UI", ORANGE)
         self.status_labels["dx12"] = status_badge("DX12", ACCENT)
         self.status_labels["delay"] = status_badge("DELAYED", ORANGE)
@@ -209,7 +245,6 @@ class DLLInjectorGUI:
                  bg=BG_PANEL, font=FONT_BTN).pack(anchor="w", padx=15, pady=(10, 4))
         body = tk.Frame(opt_panel, bg=BG_PANEL)
         body.pack(fill="x", padx=15, pady=(0, 10))
-
         tk.Checkbutton(
             body, text="Delete CFG before launch",
             variable=self.delete_cfg_var,
@@ -218,7 +253,6 @@ class DLLInjectorGUI:
             activebackground=BG_PANEL,
             font=FONT_LABEL
         ).pack(anchor="w")
-
         tk.Checkbutton(
             body, text="Apply default GameUserSettings.ini",
             variable=self.update_ini_var,
@@ -227,10 +261,8 @@ class DLLInjectorGUI:
             activebackground=BG_PANEL,
             font=FONT_LABEL
         ).pack(anchor="w", pady=(4, 8))
-
         tk.Label(body, text="BlackCipherDelay (ms)", fg=MUTED,
                  bg=BG_PANEL, font=FONT_LABEL).pack(anchor="w")
-
         tk.Scale(
             body, variable=self.blackcipher_delay,
             from_=2500, to=60000,
@@ -240,10 +272,40 @@ class DLLInjectorGUI:
             highlightthickness=0
         ).pack(fill="x")
 
+        # ================= INFO TAGS (Right Side) =================
+        info_frame = tk.Frame(body, bg=BG_PANEL)
+        info_frame.pack(fill="x", pady=(12, 0))
+
+        def create_info_tag(parent, text, color, command):
+            lbl = tk.Label(
+                parent,
+                text=text,
+                bg=color,
+                fg="#000000",
+                font=("Segoe UI", 9, "bold"),
+                padx=12,
+                pady=4,
+                cursor="hand2"
+            )
+            lbl.pack(side="right", padx=4)
+            lbl.bind("<Button-1>", lambda e: command())
+            return lbl
+
+        create_info_tag(info_frame, "DELAYED", ORANGE, self.show_delayed_info)
+        create_info_tag(info_frame, "DX12", ACCENT, self.show_dx12_info)
+        create_info_tag(info_frame, "M1UI", ORANGE, self.show_m1ui_info)
+
+        tk.Label(
+            info_frame,
+            text="Click tags for injection details →",
+            fg=MUTED,
+            bg=BG_PANEL,
+            font=("Segoe UI", 9)
+        ).pack(side="right", padx=8)
+
         # ================= ACTIONS =================
         action_row = tk.Frame(self.root, bg=BG_MAIN)
         action_row.pack(fill="x", padx=20, pady=10)
-
         tk.Button(
             action_row, text="Launch TFD",
             command=self.launch_game,
@@ -252,7 +314,6 @@ class DLLInjectorGUI:
             relief="flat",
             padx=22, pady=6
         ).pack(side="left", padx=(0, 10))
-
         tk.Button(
             action_row, text="EAC Files (One-Time)",
             command=self.update_game_files,
@@ -283,21 +344,32 @@ class DLLInjectorGUI:
     def update_status_badges(self):
         try:
             dll = self.dll_path.get().strip()
+            m1ui_detected = False
+            dx12_detected = False
             if os.path.isfile(dll):
-                self.status_labels["m1ui"].config(
-                    bg="#ffb454" if check_m1ui_dll(dll) else "#3b3f46"
-                )
-                self.status_labels["dx12"].config(
-                    bg="#66c0f4" if check_dx12_hooks(dll) else "#3b3f46"
-                )
+                dx12_detected = check_dx12_hooks(dll)
+                if not dx12_detected:
+                    m1ui_detected = check_m1ui_dll(dll)
+            OFF = "#3b3f46"
+            M1UI_ON = "#ffb454"
+            DX12_ON = "#66c0f4"
+            DELAY_ON = "#ffb454"
+            READY_ON = "#5cff8d"
+            WAITING_ON = "#66c0f4"
+            self.status_labels["dx12"].config(
+                bg=DX12_ON if dx12_detected else OFF
+            )
+            self.status_labels["m1ui"].config(
+                bg=M1UI_ON if m1ui_detected else OFF
+            )
             self.status_labels["delay"].config(
-                bg="#ffb454" if self.delayed_injection else "#3b3f46"
+                bg=DELAY_ON if self.delayed_injection else OFF
             )
             self.status_labels["state"].config(
                 text="INJECTED" if self.injection_done else "WAITING",
-                bg="#5cff8d" if self.injection_done else "#66c0f4"
+                bg=READY_ON if self.injection_done else WAITING_ON
             )
-        except:
+        except Exception:
             pass
         self.root.after(1000, self.update_status_badges)
 
@@ -395,8 +467,6 @@ class DLLInjectorGUI:
                 self.log("[!] Game folder not found. Skipping cleanup.")
                 return
             self.log(f"[i] Game found at: {game_folder}")
-
-            # CFG Deletion
             cfg_file = game_folder / "M1" / "Binaries" / "Win64" / "CFG.ini"
             if self.delete_cfg_var.get() and cfg_file.exists():
                 try:
@@ -406,15 +476,9 @@ class DLLInjectorGUI:
                     self.log(f"[!] Failed to delete CFG file: {e}")
             else:
                 self.log("[i] CFG file not found or deletion not selected, skipping.")
-
-            # INI Update
             if self.update_ini_var.get():
                 self.update_game_settings_ini()
-
-            # Clean logs, crashes, webcache
             self.clean_game_folders(game_folder)
-
-            # DX12 Check
             dll_path = self.dll_path.get().strip()
             if not os.path.isfile(dll_path):
                 self.log("[!] DLL path invalid. Launch aborted.")
@@ -427,8 +491,6 @@ class DLLInjectorGUI:
             else:
                 self.log("[~] DX12 indicators missing → delaying injection by 40s (25+15).")
                 self.delayed_injection = True
-
-            # Launch the game via Steam
             os.system("start steam://run/2074920")
             self.log("[+] Launch command sent to Steam.")
         except Exception as e:
@@ -444,22 +506,18 @@ class DLLInjectorGUI:
             webcache_folder = crashes_folder.parent / "webcache_4430"
             blackcipher_folder = game_folder / "M1" / "Binaries" / "Win64" / "BlackCipher"
             pipeline_file = webcache_folder.parent / "M1_PCD3D_SM6.upipelinecache"
-
             folders_to_clean = [
                 ("CrashReportClient", crash_report_client),
                 ("Logs", logs_folder),
                 ("Crashes", crashes_folder),
                 ("Webcache", webcache_folder)
             ]
-
             def safe_rmdir(path):
                 if path.exists() and path.is_dir():
                     shutil.rmtree(path, ignore_errors=True)
-
             def safe_remove(path):
                 if path.exists() and path.is_file():
                     path.unlink()
-
             for name, folder in folders_to_clean:
                 if folder.exists():
                     self.log(f"[i] Cleaning {name} folder...")
@@ -475,13 +533,11 @@ class DLLInjectorGUI:
                             self.log(f"[!] Failed to delete {item}: {e}")
                 else:
                     self.log(f"[i] {name} folder not found, skipping.")
-
             if pipeline_file.exists():
                 safe_remove(pipeline_file)
                 self.log(f"[i] Deleted pipeline cache: {pipeline_file.name}")
             else:
                 self.log("[i] Pipeline cache not found, skipping.")
-
             if blackcipher_folder.exists():
                 self.log("[i] Cleaning BlackCipher logs and dumps...")
                 for ext in ["*.log", "*.dump"]:
@@ -603,8 +659,6 @@ class DLLInjectorGUI:
         if not os.path.isfile(dll_path):
             self.log("[!] DLL path invalid or file missing.")
             return
-
-        # M1UI SHORT-CIRCUIT
         if check_m1ui_dll(dll_path, self.log):
             self.log("[+] M1UI detected — skipping prep logic")
             self.save_last_dll_path(dll_path)
@@ -655,16 +709,13 @@ class DLLInjectorGUI:
                 self.locate_injected_dll,
                 args=[dll_path, h_process]
             ).start()
-            return  # Stop here for M1UI case
+            return
 
-        # ORIGINAL LOGIC
         self.save_last_dll_path(dll_path)
         target_proc = self.get_process_info_by_name("M1-Win64-Shipping.exe")
         if not target_proc:
             self.log("[!] Target process not found.")
             return
-
-        # Instant injection CFG update
         if not self.delayed_injection and self.blackcipher_delay.get():
             try:
                 game_folder = self.find_game_folder()
@@ -684,7 +735,6 @@ class DLLInjectorGUI:
                     self.log(f"[i] Updated BlackCipherDelay to {self.blackcipher_delay.get():.6f}")
             except Exception as e:
                 self.log(f"[!] Failed to update BlackCipherDelay: {e}")
-
         PID = target_proc.info['pid']
         dll_bytes = dll_path.encode('ascii') + b'\x00'
         dll_length = len(dll_bytes)
